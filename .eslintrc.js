@@ -1,6 +1,8 @@
 module.exports = {
   root: true,
+  plugins: ["vue"],
   env: {
+    browser: true,
     node: true
   },
   extends: [
