@@ -22,7 +22,7 @@ const MAX_POINT_SIZE = 100.0;
 @Component<Scene>({
   data() {
     return {
-      pointerStyle: "auto"
+      pointerStyle: "auto",
     };
   },
 
@@ -99,8 +99,8 @@ const MAX_POINT_SIZE = 100.0;
       }
 
       this.renderer.render(this.scene, this.camera);
-    }
-  }
+    },
+  },
 })
 export default class Scene extends Vue {
   private camera!: THREE.OrthographicCamera;
@@ -114,8 +114,8 @@ export default class Scene extends Vue {
     const [width, height] = this.getTargetClientRectSize();
     this.renderer.setSize(width, height);
 
-    this.points.userData.width = width;
-    this.points.userData.height = height;
+    this.points.userData.widthSq = width * width;
+    this.points.userData.heightSq = height * height;
 
     const [[minX, maxX], [minY, maxY]] = this.getCameraFrustum();
     this.camera.left = minX;
@@ -129,7 +129,7 @@ export default class Scene extends Vue {
   private getTargetClientRectSize() {
     return [
       window.innerWidth * CANVAS_SCALE,
-      window.innerHeight * CANVAS_SCALE
+      window.innerHeight * CANVAS_SCALE,
     ];
   }
 
@@ -142,7 +142,7 @@ export default class Scene extends Vue {
 
     return [
       [minX, maxX],
-      [minY, maxY]
+      [minY, maxY],
     ];
   }
 

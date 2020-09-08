@@ -18,56 +18,55 @@ import {
   Vector3,
 } from "three";
 
-const _screenRadii = new Vector3();
-const _topRight = new Vector3();
-const _bottomLeft = new Vector3();
-const _temp = new Vector3();
-const _box3 = new Box3();
 const _intersectPoint = new Vector3();
+const _intersectScreenPoint = new Vector3();
+
+const _plane = new Plane();
 
 // intersection testing function
 function testPoint(
   screenPosition: Vector3,
-  pixelSize: number,
-  screenWidth: number,
-  screenHeight: number,
-  unprojectMatrix: Matrix4,
+  worldPosition: Vector3,
+  pixelSizeSq: number,
+  screenWidthSq: number,
+  screenHeightSq: number,
+  cameraDirection: Vector3,
+  viewProjectionMatrix: Matrix4,
   raycaster: Raycaster,
   intersects: Intersection[],
   index: number,
   object: VariablePoints
 ) {
-  // unprojects the top right and bottom left point of the screen-space
-  // circle's bounding box to world space to perform ray casting with Box3
-  _screenRadii.set(pixelSize / screenWidth, pixelSize / screenHeight, 0);
-  _topRight
-    .copy(screenPosition)
-    .add(_screenRadii)
-    .applyMatrix4(unprojectMatrix);
-  _bottomLeft
-    .copy(screenPosition)
-    .sub(_screenRadii)
-    .applyMatrix4(unprojectMatrix);
-  _temp.copy(_topRight);
-  _topRight.max(_bottomLeft);
-  _bottomLeft.min(_temp);
+  _plane.setFromNormalAndCoplanarPoint(cameraDirection, worldPosition);
 
-  _box3.set(_bottomLeft, _topRight);
-  if (raycaster.ray.intersectBox(_box3, _intersectPoint)) {
-    intersects.push({
-      distance: raycaster.ray.origin.distanceTo(_intersectPoint),
-      point: _intersectPoint.clone(),
-      index,
-      face: null,
-      object: object,
-    });
+  if (raycaster.ray.intersectPlane(_plane, _intersectPoint)) {
+    _intersectScreenPoint
+      .copy(_intersectPoint)
+      .applyMatrix4(viewProjectionMatrix);
+    _intersectScreenPoint.sub(screenPosition);
+    const pixelDistSq =
+      _intersectScreenPoint.x * _intersectScreenPoint.x * screenWidthSq +
+      _intersectScreenPoint.y * _intersectScreenPoint.y * screenHeightSq;
+    if (pixelDistSq <= pixelSizeSq) {
+      intersects.push({
+        distance: raycaster.ray.origin.distanceTo(_intersectPoint),
+        point: _intersectPoint.clone(),
+        index,
+        face: null,
+        object: object,
+      });
+    }
   }
 }
 
+const _position = new Vector3();
+
 const _screenPosition = new Vector3();
+const _worldPosition = new Vector3();
 const _sphere = new Sphere();
 const _modelViewProjectionMatrix = new Matrix4();
-const _unprojectMatrix = new Matrix4();
+const _viewProjectionMatrix = new Matrix4();
+const _cameraDirection = new Vector3();
 
 export class VariablePoints extends Points<BufferGeometry, ShaderMaterial> {
   constructor(width: number, height: number, geometry?: BufferGeometry) {
@@ -101,8 +100,8 @@ export class VariablePoints extends Points<BufferGeometry, ShaderMaterial> {
 
     super(geometry, material);
 
-    this.userData.width = width;
-    this.userData.height = height;
+    this.userData.widthSq = width * width;
+    this.userData.heightSq = height * height;
   }
 
   raycast(raycaster: Raycaster, intersects: Intersection[]): void {
@@ -110,9 +109,9 @@ export class VariablePoints extends Points<BufferGeometry, ShaderMaterial> {
       console.error(
         'VariablePoints: "Raycaster.camera" needs to be set in order to raycast.'
       );
-    } else if (!this.userData.width || !this.userData.height) {
+    } else if (!this.userData.widthSq || !this.userData.heightSq) {
       console.error(
-        "VariablePoints: needs screen width and height in userData in order to raycast."
+        "VariablePoints: needs screen width and height squares in userData in order to raycast."
       );
     }
 
@@ -135,14 +134,16 @@ export class VariablePoints extends Points<BufferGeometry, ShaderMaterial> {
     const positions = attributes.position.array;
     const sizes = attributes.size.array;
 
-    _modelViewProjectionMatrix
-      .copy(this.matrixWorld)
-      .premultiply(raycaster.camera.matrixWorldInverse)
+    _viewProjectionMatrix
+      .copy(raycaster.camera.matrixWorldInverse)
       .premultiply(raycaster.camera.projectionMatrix);
 
-    _unprojectMatrix
-      .copy(raycaster.camera.projectionMatrixInverse)
-      .premultiply(raycaster.camera.matrixWorld);
+    _modelViewProjectionMatrix
+      .copy(this.matrixWorld)
+      .premultiply(_viewProjectionMatrix);
+
+    raycaster.camera.getWorldDirection(_cameraDirection);
+    _cameraDirection.negate();
 
     if (index !== null) {
       const indices = index.array;
@@ -150,17 +151,21 @@ export class VariablePoints extends Points<BufferGeometry, ShaderMaterial> {
       for (let i = 0, il = indices.length; i < il; i++) {
         const a = indices[i];
 
+        _position.fromArray(positions, a * 3);
         _screenPosition
-          .fromArray(positions, a * 3)
+          .copy(_position)
           .applyMatrix4(_modelViewProjectionMatrix);
+        _worldPosition.copy(_position).applyMatrix4(this.matrixWorld);
         const size = sizes[a];
 
         testPoint(
           _screenPosition,
-          size,
-          this.userData.width,
-          this.userData.height,
-          _unprojectMatrix,
+          _worldPosition,
+          size * size,
+          this.userData.widthSq,
+          this.userData.heightSq,
+          _cameraDirection,
+          _viewProjectionMatrix,
           raycaster,
           intersects,
           a,
@@ -169,17 +174,21 @@ export class VariablePoints extends Points<BufferGeometry, ShaderMaterial> {
       }
     } else {
       for (let i = 0, l = positions.length / 3; i < l; i++) {
+        _position.fromArray(positions, i * 3);
         _screenPosition
-          .fromArray(positions, i * 3)
+          .copy(_position)
           .applyMatrix4(_modelViewProjectionMatrix);
+        _worldPosition.copy(_position).applyMatrix4(this.matrixWorld);
         const size = sizes[i];
 
         testPoint(
           _screenPosition,
-          size,
-          this.userData.width,
-          this.userData.height,
-          _unprojectMatrix,
+          _worldPosition,
+          size * size,
+          this.userData.widthSq,
+          this.userData.heightSq,
+          _cameraDirection,
+          _viewProjectionMatrix,
           raycaster,
           intersects,
           i,
